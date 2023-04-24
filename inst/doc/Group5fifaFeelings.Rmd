@@ -1,0 +1,300 @@
+---
+title: "Using the fifaFeelings Package"
+author: "Group 5"
+date: "12/15/22"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Using the fifaFeelings Package}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(fifaFeelings)
+library(ggplot2)
+library(ggthemes)
+library(rtweet)
+library(wordcloud2)
+library(corpus)
+library(purrr)
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(plotly)
+```
+
+# Introduction
+## Topic(s)
+- NLP
+- Geospatial 
+- Visualization/ Integration 
+
+--Geospatial methods: One component of creating our proposed functions involve processing and presenting Tweets. We can visualize point data such as by using heat maps to build our basic foundation of presenting the data. We could also use spatial statistics like spatial dependence, Moran’s I and the Moran scatterplot.
+
+--Natural language processing: Another component of our analysis involves exploratory analysis of the text of the Tweets themselves and displaying those on top of the map of the location of Tweets. Here, we will use a word/tag cloud, word frequency tables, and sentiment analysis to help visualize the term-document matrix. Additionally, we will create the corpus, clean the corpus such as stop word filtering, stem words, remove punctuation, and remove whitespace. All natural language processing will be represented using bag-of-words rather than a more grammatically complicated vector space model.
+Visualization and Integration: The third component will be integrating both the geospatial and NLP presentations into an interactive map, with a custom color palette.
+
+-- Visualization and Integration: The third component will be integrating both the geospatial and NLP presentations into an interactive map, with a custom color palette.
+
+
+#plotWord(): Function
+This function lets the user select a word and a dataset (our FifaFeelings dataset will be the default). The function will then plot the tweets containing that word on a map of California with the size of each point depending on the number of retweets each tweet got. This function is dependent on the ggplot2 package.
+
+```{r}
+
+plotWord <- function(word) {
+  sub.data <- california_fifa[which(grepl(word,california_fifa$full_text)),]
+  
+  ggplot() + 
+    borders(database="state",
+            regions = "california",
+            col = "gray95", 
+            fill = "gray90") +
+    theme_map() + 
+    geom_point(data = sub.data, aes(x = lng, y = lat, size = retweet_count))
+}
+
+## EXAMPLE
+plotWord(word = "goal")
+
+```
+
+## Example on Fifa Color & our function to clean up our data 
+
+## scrubMe(): FUNCTION
+This function performs all basic cleaning functions: tokenization, remove punctuation and special characters, remove English stop words like “the”, and stems words using bag-of-words methodology which is the most simple way to look at words as if they have no grammar. Each word is treated independently of its grammar and the way in which it is used.
+
+--	Input: The original dataframe of tweets that was collected using the rtweets package. Can only guarantee that this function works for tweets collected using the rtweets format, not by using any other method of tweet collection. 
+
+---	Output: An object of type “list” where each row corresponds to a single tweet, and each row contains the processed words that were contained within that tweet.
+
+-- -	Special note: The column name of the dataframe that contains the scraped tweets must be called “full_text” (so that the whole column that contains the text of the tweets is dataframe$full_text). If it is called anything else, you will need to rename the column with the text from each tweet to be “full_text”.
+
+```{r, fig.show='hold'}
+
+# FIFA 2022 color palette
+fifaPalette <- c("#1077C3", "#49BCE3", "#FEC310", "#56042C")
+
+```
+
+
+```{r}
+# Function to clean tweets
+scrubMe <- function(data){
+  corpus <- data$full_text
+  corpus <- purrr::map(corpus, function(x) str_split(tolower(x),"\\s+") %>% unlist) #tokenization
+  corpus <- purrr::map(corpus, function(x) gsub("[^a-z]","",x))   #remove anything except letters
+  corpus <- purrr::map(corpus, function(x) x[!(x %in% stopwords::stopwords("en"))]) #Remove stop-words ("the", "in", etc.)
+  corpus <- purrr::map(corpus, function(x) text_tokens(x, stemmer="en") %>% unlist) #stem
+  return(corpus)
+}
+
+# Test & function to remove rare words
+clean_test <- scrubMe(california_fifa)
+```
+
+
+## removeRare():Function
+This function takes the output from the scrubMe function and gets rid of words that appeared less than 20 times. I.e., gets rid of the most rare words, which are kind of like outliers since they don’t represent how most people feel. They can also be words that are unintelligible.
+
+-	Input: Object of type “list” where each each row corresponds to a single tweet, and the words used in each tweet have been already been cleaned.
+
+-	Output: A single list/vector of character strings of object type “character” where each row is a word cleaned word. This output is sometimes called a bag-of-words, or a dictionary since it is a dictionary of the root of every word used in the tweets. Words are repeated if they appear more than once. Words that appeared fewer than 20 times in total have been removed.
+
+
+```{r}
+# Function to remove rare words
+removeRare <- function(corpus){
+  
+  words <- as.data.frame(sort(table(unlist(corpus)), decreasing = TRUE), stringsAsFactors = FALSE)
+  words <- words$Var1[which(words$Freq >= 20)]
+  
+  return(words)
+}
+
+# Test
+rare_test <- removeRare(clean_test)
+
+```
+
+## get_dtm(): Function
+This function takes as inputs the original dataframe of tweets and the output from removeRare to create a document-term matrix.
+```{r}
+# Function to create document term matrix
+get_dtm <- function(data, dict){
+  corpus <- data$full_text
+  
+  # Cleaning
+  corpus <- purrr::map(corpus, function(x) str_split(tolower(x),"\\s+") %>% unlist) 
+  corpus <- purrr::map(corpus, function(x) gsub("[^a-z]","",x))
+  corpus <- purrr::map(corpus, function(x) x[!(x %in% stopwords::stopwords("en"))])
+  corpus <- purrr::map(corpus, function(x) text_tokens(x, stemmer="en") %>% unlist)
+  
+  corpus <- purrr::map(corpus, function(x) x[x %in% dict]) # keep only uncommon words from above
+
+  dtm <- as.data.frame(matrix(0L, nrow=nrow(data), ncol=length(dict)))
+  names(dtm) <- dict
+  
+  freq <- purrr::map(corpus, table)
+  for (i in 1:nrow(dtm)){
+    dtm[i, names(freq[[i]])] <- unname(freq[[i]])
+  }
+  
+  return(dtm)
+}
+
+# Test
+test_dtm <- get_dtm(california_fifa, rare_test)
+```
+
+## Function to build FIFA-themed word cloud from a Document Term Matrix
+buildMyFifaCloud():This function takes the document term matrix (the output from get_dtm function)
+and builds a FIFA-themed word cloud of the top 100-most frequently used words. 
+
+```{r}
+buildMyFifaCloud <- function(dtm){
+  
+  df <- data.frame(word = names(dtm), freq = colSums(dtm))
+  df <- df[rev(order(df$freq)), ]
+  cloud <- wordcloud2(head(df, 100), size = 3, color = rep_len(fifaPalette, 100))
+  
+  return(cloud)
+}
+
+# Test
+buildMyFifaCloud(test_dtm)
+```
+
+## Function to build sentiment scores from documents
+
+#getMyScore(): 
+-This function calculates a sentiment score (number of positive word matches - number of negative word matches) from a collection of words. A positive sentiment score means more positive matches were detected than negative ones. A negative sentiment score means more negative matches were detected than positive ones.
+
+-	Special note: To get a sentiment score for each tweet (which could later be used to create a histogram of the frequency of sentiment scores), use sapply(a, b) where a is your output from scrubMe and b is the getMyScore function. To get a sentiment score for the whole collection of words/dictionary without paying attention to which tweet it corresponds to, just use getMyScore() where the input is the output from removeRare.
+
+```{r}
+#pos words are those revolving something positive
+#neg words are those with a negative, or known as controversial 
+
+# Sentiment score for a single tweet/treating tweets as if it were a single text
+getMyScore <- function(words){
+  pos_matches <- match(words, pos_words)
+  neg_matches <- match(words, neg_words)
+  pos_matches <- !is.na(pos_matches)
+  neg_matches <- !is.na(neg_matches)
+  score <- sum(pos_matches) - sum(neg_matches)
+  return(score)
+}
+
+# Test
+getMyScore(rare_test)
+
+# Another test; Calculate score for each tweet
+test_score <- sapply(clean_test, getMyScore)
+
+```
+
+#tempCheck(): Function
+Quickly build a FIFA-themed histogram of sentiment scores without needing to do any prior pre-processing. Just input your raw dataframe collected using rtweet. Like above, the column name of the text of your tweets must be called “full_text”.
+
+```{r}
+# Function to build a FIFA-themed histogram of sentiment scores, no pre-processing necessary
+tempCheck <- function(data){
+  clean_test <- scrubMe(data)
+  rare_test <- removeRare(clean_test)
+  test_dtm <- get_dtm(data, rare_test)
+  test_score <- sapply(clean_test, getMyScore)
+  tweets_hist <- plotly::plot_ly(x = ~test_score, type = "histogram",
+                         marker = list(color = fifaPalette[4],
+                                       line = list(color = fifaPalette[2],
+                                                   width = 2))) %>% 
+    plotly::layout(title = "Frequency distribution of sentiment scores",
+           yaxis = list(title = "Frequency",
+                        zeroline = FALSE),
+           xaxis = list(title = "Sentiment score",
+                        zeroline = FALSE))
+  tweets_hist
+}
+
+# Test
+tempCheck(california_fifa)
+
+
+```
+
+
+
+
+## Why is this interesting? Why did we choose this?
+ -- To visualize possible preliminary relationships within the geospatial, time series, and natural language parts of their Twitter data. 
+
+--This problem is so bad that the focus of analyzing Twitter data is overwhelmingly on the textual processing and ignores both the geospatial and time series components of the data, which could provide really important insights that you miss completely if it’s too frustrating to even understand where that information is stored in the dataframe and how to access it. We think that you shouldn’t have to think about that just to do simple EDA on your data.
+
+--Even just considering analyzing the textual data, it takes a lot of functions, debugging, and time to even get your textual data processed in a way that is useful to you, and the amount of options to do it are frankly overwhelming and riddled with packages that are no longer maintained.
+
+--This is especially a huge barrier to beginners or social analysts who don’t want to get bogged down in the details of computer code.
+Our functions allow you to be able to quickly get a pulse/temperature check on how a population is feeling about something, where they are located, and at what time, so that it is easiest on you, the analyst, to use your contextual knowledge and understand patterns that are co-occurring.
+
+-- Our functions allow you to be able to quickly get a pulse/temperature check on how a population is feeling about something, where they are located, and at what time, so that it is easiest on you, the analyst, to use your contextual knowledge and understand patterns that are co-occurring.
+
+```{r}
+
+
+# Function to generate a time series plot of a given word of california_fifa data
+plotWordSeries <- function(word){
+  
+  sub_data <- california_fifa[which(grepl(word, california_fifa$full_text)), ]
+  
+  ts_plot(sub_data, "hours") + 
+    ggplot2::theme_light() +
+    ggplot2::theme(plot.title = ggplot2::element_text(face = "bold")) +
+    ggplot2::labs(
+      x = NULL, y = NULL,
+      title = "Time Series of Tweets Containing this Word by Hours")
+}
+
+
+# Test
+plotWordSeries("goal")
+
+
+```
+
+## Who is this for & 3 things trying to accomplish with this package
+-- . One of our goals was therefore to collect and provide a dataset of Tweets for others to be able to analyze and better understand what the attitudes are around the World Cup this year, which could also help scientists and marketing professionals study what makes consumers divest from something they love dearly.
+We also give you a color palette of the brand colors used for this year’s World Cup.
+
+-- Our functions “scrubMe”, “removeRare”, and “get_dtm” are designed to make the data cleaning and organizing as easy as possible. They can be used independently, so for example if you just want your data cleaned and then want to use your own functions for the rest, scrubMe is a great choice for that. When used together sequentially, they allow you to build a dictionary of words that were tweeted, as well as a document term matrix that can be used with other algorithms and packages if you’d like.
+
+-- With our package, you can also go one step further and fully automate the entire data visualization workflow. You don’t need to do any data cleaning at all to get a visualization. 
+E.g., Our functions “getWord” and “getWordSeries” are built to analyze the FIFA dataset. All you have to do is insert the word you are interested in, and they will respectively plot a heat map of where that word was tweeted and a time series of the number of times that word was tweeted. 
+Our function tempCheck takes your raw dataframe and gives you back a histogram of the sentiment scores assigned to each tweet.
+(We have more examples, but this section might be getting long enough. Not sure how many functions we want to showcase.)
+
+
+
+
+
+## So what are some limitation/Downside to the packages? 
+--Our initial idea was to automate the entire workflow and simultaneously plot all of our visualizations at once, which we were never able to debug.
+
+--Only guaranteed to work on dataframes collected by the rtweets package. Also, the column name of the dataframe that contains the text of the tweets must be called “full_text”. If it’s not called “full_text”, you’ll need to rename your column.
+
+--Limited by twitter geotagging/limits
+The number of Tweets that are geotagged is a small percentage, however you can use most of our functions on Tweets that are not geotagged. 
+
+
+## Refrences 
+-- https://www.cs.uic.edu/~liub/FBS/sentiment-analysis.html#lexicon 
+-- Twitter data ;The twitter data was obtained using the rtweet package.
+The search_tweets() function was utilized to find tweets containing ‘#FIFAWORLDCUP’.
+(Example)
+search_tweets("#FIFAWORLDCUP", n = 100000, retryonratelimit = TRUE, geocode =  ("36.7378,-119.7871,50mi"))
+Entering latitudinal and longitudinal coordinates along with a radius into the geocode argument allowed us to grab geotagged tweets within the specified region. Multiple searches were made to span all of California. (Search by region ‘California’ did not work so we had to do it manually) The tweets were collected on November 30th and include tweets made between then and 8 days prior.
