@@ -1,0 +1,17 @@
+Package: fifaFeelings
+Type: Package
+Title: Clean Twitter data and make plots/perform data analysis on it
+Version: 0.1.0
+Author: Group 5
+Maintainer: Beth Reddy <ereddy7214@sdsu.edu>
+Description: This package contains a dataset of #FIFA tweets scraped in California. The functions allow a user specified dataset to be used instead, but the default option is to use the provided FIFA California dataset. The functions allow the user to create maps based off of a certain keyword. The user can also create a word cloud of words in tweets, and a time series of when the tweets were tweeted. The user can perform a sentiment analysis on tweets using the sentiment score function. The data cleaning functions allow the user to remove rare words, non-alphabetical words, and set all words to lowercase for a more consistent word cloud.
+License: `use_mit_license()`
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.1
+Suggests: knitr, rmarkdown
+VignetteBuilder: knitr
+NeedsCompilation: no
+Packaged: 2022-12-12 22:19:06 UTC; bethreddy
+Depends: R (>= 3.5.0)
